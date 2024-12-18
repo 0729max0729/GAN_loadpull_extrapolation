@@ -4,7 +4,9 @@ from torchvision.utils import save_image
 from torchvision import transforms
 from PIL import Image
 import os
-from diffusion_train import DiffusionModel, forward_diffusion, beta_schedule, alphas, posterior_variance,transform
+
+from Transformer_model import UNetTransformer
+from diffusion_train import  forward_diffusion, beta_schedule, alphas, posterior_variance,transform
 import matplotlib.pyplot as plt
 from diffusion_train import backward_diffusion,generate_random_square_mask,sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod
 
@@ -35,8 +37,8 @@ def visualize_xt_distribution(xt, step, save_path=None):
 
 
 # 初始化模型并加载权重
-diffusion_model = DiffusionModel().to(device)
-diffusion_model.load_state_dict(torch.load("model/diffusion_model256.pth"))
+diffusion_model = UNetTransformer().to(device)
+diffusion_model.load_state_dict(torch.load("model/diffusion_model_transformer.pth"))
 
 # 加载输入图像并生成遮罩
 input_image_path = "test_results/generated_image.png"  # 替换为您的输入图像路径

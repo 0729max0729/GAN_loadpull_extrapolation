@@ -8,12 +8,14 @@ from torchvision import transforms
 from torchvision.utils import save_image
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
+
+from Transformer_model import UNetTransformer
 from UNet import UNet
 
 
 # 参数设置
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-batch_size = 128
+batch_size = 64
 lr = 1e-3
 epochs = 10001
 T = 1000  # 扩散过程的总时间步长
@@ -54,7 +56,7 @@ class CustomDataset(Dataset):
 
 # 图像预处理转换
 transform = transforms.Compose([
-    transforms.Resize(256),
+    transforms.Resize(128),
     transforms.ToTensor(),
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # 归一化到 [-1, 1]
 ])
@@ -67,92 +69,11 @@ dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 import torch
 import torch.nn as nn
 
-class DiffusionModel(nn.Module):
-    def __init__(self):
-        super(DiffusionModel, self).__init__()
 
-        # 时间嵌入层
-        self.time_embedding = nn.Sequential(
-            nn.Linear(1, 256),  # 时间步映射到高维
-            nn.ReLU(inplace=True),
-            nn.Linear(256, 256),
-            nn.ReLU(inplace=True)
-        )
-
-        # 编码器部分
-        self.enc1 = self.conv_block(3, 64)
-        self.enc2 = self.conv_block(64, 128)
-        self.enc3 = self.conv_block(128, 256)
-        self.enc4 = self.conv_block(256, 512)
-        self.enc5 = self.conv_block(512, 1024)
-        self.enc6 = self.conv_block(1024, 2048)
-        self.enc7 = self.conv_block(2048, 4096)  # 增加深度
-
-        # 解码器部分
-        self.dec7 = self.upconv_block(4096 + 256, 2048)  # 拼接时间嵌入
-        self.dec6 = self.upconv_block(2048 + 2048, 1024)
-        self.dec5 = self.upconv_block(1024 + 1024, 512)
-        self.dec4 = self.upconv_block(512 + 512, 256)
-        self.dec3 = self.upconv_block(256 + 256, 128)
-        self.dec2 = self.upconv_block(128 + 128, 64)
-        self.dec1 = self.upconv_block(64 + 64, 64)
-        self.output_conv = nn.Sequential(
-            nn.Conv2d(64, 32, kernel_size=1),
-            #nn.ReLU(inplace=True),
-            nn.Conv2d(32, 3, kernel_size=1)
-        )
-
-    def conv_block(self, in_channels, out_channels, kernel_size=3, padding=1,stride=2):
-        """卷积块：Conv2d -> BatchNorm -> ReLU"""
-        return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding),
-            #nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=1),
-            nn.ReLU(inplace=True)
-        )
-
-    def upconv_block(self, in_channels, out_channels, kernel_size=3, padding=1,stride=2):
-        """反卷积块：ConvTranspose2d -> BatchNorm -> ReLU"""
-        return nn.Sequential(
-            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, output_padding=1),
-            #nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=1),
-            nn.ReLU(inplace=True)
-        )
-
-    def forward(self, img, t):
-        # 时间嵌入
-        t_embedding = self.time_embedding(t.view(-1, 1))  # 将时间步映射为 (batch_size, 256)
-        t_embedding = t_embedding.view(-1, 256, 1, 1)  # 调整为 (batch_size, 256, 1, 1)
-
-        # 编码器
-        e1 = self.enc1(img)
-        e2 = self.enc2(e1)
-        e3 = self.enc3(e2)
-        e4 = self.enc4(e3)
-        e5 = self.enc5(e4)
-        e6 = self.enc6(e5)
-        e7 = self.enc7(e6)
-
-        # 上采样时间嵌入以匹配 e7 的形状
-        t_embedding = nn.functional.interpolate(t_embedding, size=(e7.shape[2], e7.shape[3]), mode='nearest')
-        # 解码器
-        d7 = self.dec7(torch.cat([e7, t_embedding], dim=1))
-        d6 = self.dec6(torch.cat([d7, e6], dim=1))
-        d5 = self.dec5(torch.cat([d6, e5], dim=1))
-        d4 = self.dec4(torch.cat([d5, e4], dim=1))
-        d3 = self.dec3(torch.cat([d4, e3], dim=1))
-        d2 = self.dec2(torch.cat([d3, e2], dim=1))
-        d1 = self.dec1(torch.cat([d2, e1], dim=1))
-
-        # 输出
-        return self.output_conv(d1)
 
 
 # 初始化模型
-diffusion_model = DiffusionModel().to(device)
+diffusion_model = UNetTransformer().to(device)
 optimizer = optim.Adam(diffusion_model.parameters(), lr=lr, weight_decay=1e-4)
 
 def forward_diffusion(x_0, t, sqrt_alphas_cumprod, sqrt_oneminus_alphas_cumprod):
@@ -227,7 +148,7 @@ sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
 posterior_variance = beta_schedule.sqrt() * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
 
-def generate_random_square_mask(image_size, mask_size=16):
+def generate_random_square_mask(image_size, mask_size=64):
     """
     生成中心方形遮罩
     Args:
@@ -286,8 +207,8 @@ def generate_random_square_mask0(image_size, mask_size=64):
     return mask
 
 if __name__ == "__main__":
-    model_path="model/diffusion_model256.pth"
-    optimizer_path = "model/diffusion_optimizer256.pth"
+    model_path="model/diffusion_model_transformer.pth"
+    optimizer_path = "model/diffusion_optimizer_transformer.pth"
     # 如果所有模型和优化器的权重文件都存在，则加载
     if os.path.exists(model_path)&os.path.exists(optimizer_path):
         print("发现已有模型和优化器权重文件，正在加载...")
