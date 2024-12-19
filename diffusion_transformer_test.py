@@ -6,14 +6,15 @@ from PIL import Image
 import os
 
 from Transformer_model import UNetTransformer
-from diffusion_train import  forward_diffusion, beta_schedule, alphas, posterior_variance,transform
+from diffusion_transformer_train import forward_diffusion, beta_schedule, alphas, posterior_variance, transform, \
+    image_size, model_path
 import matplotlib.pyplot as plt
 from diffusion_transformer_train import backward_diffusion, generate_random_square_mask, sqrt_alphas_cumprod, \
     sqrt_one_minus_alphas_cumprod, diffusion_model
 
 # 参数设置
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-T = 999  # 扩散过程的总时间步长
+T = 255 # 扩散过程的总时间步长
 
 
 
@@ -39,7 +40,7 @@ def visualize_xt_distribution(xt, step, save_path=None):
 
 # 初始化模型并加载权重
 
-diffusion_model.load_state_dict(torch.load("model/diffusion_model_transformer.pth"))
+diffusion_model.load_state_dict(torch.load(model_path))
 
 # 加载输入图像并生成遮罩
 input_image_path = "test_results/generated_image.png"  # 替换为您的输入图像路径
@@ -58,26 +59,22 @@ mask = generate_random_square_mask(image_size=imgs.size())
 
 
 # 正向扩散（仅遮罩部分加噪声）
-#xt, noise = forward_diffusion(imgs, T, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod)
-xt = torch.randn_like(imgs)
+xt, noise = forward_diffusion(imgs, T, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod)
+#xt = torch.randn_like(imgs)
 with torch.no_grad():
     for t in reversed(range(T)):
         # 计算当前时间步的 alpha 和 sqrt(1 - alpha)
         sqrt_alpha_cumprod_t = sqrt_alphas_cumprod[t].view(-1, 1, 1, 1)
         sqrt_oneminus_alpha_cumprod_t = sqrt_one_minus_alphas_cumprod[t].view(-1, 1, 1, 1)
 
-
         # 预测噪声
-        output = diffusion_model(xt * (1 - mask) + imgs * mask, torch.tensor(t).float().to(device))
-        predicted_noise = output[:, :3, :, :]
-        log_sigma_squared = output[:, 3:, :, :]
-        sigma = torch.exp(0.5 * log_sigma_squared)
+        predicted_noise = diffusion_model(xt * (1 - mask) + imgs * mask, torch.tensor([t]).to(device),torch.tensor([0]).to(device))
         # 反向扩散
-        xt = backward_diffusion(xt * (1 - mask), t, predicted_noise * (1 - mask), alphas,sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod,beta_schedule,sigma)
+        xt = backward_diffusion(xt * (1 - mask), t, predicted_noise * (1 - mask), alphas,sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod,beta_schedule,posterior_variance)
         # 保存当前步的图像
         save_image(xt*(1-mask)+imgs*mask, f"test_results/{t}xt.png", normalize=False)
         # 打印当前步的值范围和 alpha 信息
         print(f"Step {t}: xt min {xt.min().item()}, max {xt.max().item()}, std {xt.std().item()}")
         print(f"Step {t}: predicted_noise min {predicted_noise.min().item()}, max {predicted_noise.max().item()}")
-        print(f"Step {t}: noise {predicted_noise.mean().item()}")
+
     save_image(imgs*mask, f"test_results/0.png", normalize=True)

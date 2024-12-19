@@ -9,17 +9,18 @@ from torchvision.utils import save_image
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
-from DiT import DiT_L_4
+from DiT import DiT_L_4, DiT_B_4, DiT_L_8
 from Transformer_model import UNetTransformer
 from UNet import UNet
 
 
 # 参数设置
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-batch_size = 16
-lr = 1e-3
+batch_size = 256
+lr = 1e-4
 epochs = 1001
-T = 1000  # 扩散过程的总时间步长
+T = 256  # 扩散过程的总时间步长
+image_size=64
 
 # 定义 Beta 调度表
 def cosine_beta_schedule(T, s=0.008):
@@ -57,7 +58,7 @@ class CustomDataset(Dataset):
 
 # 图像预处理转换
 transform = transforms.Compose([
-    transforms.Resize(256),
+    transforms.Resize(image_size),
     transforms.ToTensor(),
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # 归一化到 [-1, 1]
 ])
@@ -74,11 +75,11 @@ import torch.nn as nn
 
 
 # 初始化模型
-diffusion_model = DiT_L_4(
-        input_size=256,  # 输入图像的大小，例如 32x32
+diffusion_model = DiT_B_4(
+        input_size=image_size,  # 输入图像的大小，例如 32x32
         in_channels=3,  # 输入图像通道数（RGB 图像为 3）
         num_classes=1,  # 类别数量
-        learn_sigma=True  # 是否学习噪声方差
+        learn_sigma=False  # 是否学习噪声方差
     ).cuda()  # 使用 GPU
 
 optimizer = optim.Adam(diffusion_model.parameters(), lr=lr, weight_decay=1e-4)
@@ -135,7 +136,7 @@ def backward_diffusion(x_t, t, predicted_noise, alphas, sqrt_alphas_cumprod, sqr
     # 如果 t > 0，添加噪声项；否则，直接返回均值
 
     noise = torch.randn_like(x_t)
-    x_prev = model_mean + sigma * noise
+    x_prev = model_mean + predicted_noise * noise
 
 
     return x_prev
@@ -155,7 +156,7 @@ sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
 posterior_variance = beta_schedule.sqrt() * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
 
-def generate_random_square_mask(image_size, mask_size=64):
+def generate_random_square_mask(image_size, mask_size=int(image_size/4)):
     """
     生成中心方形遮罩
     Args:
@@ -213,9 +214,11 @@ def generate_random_square_mask0(image_size, mask_size=64):
 
     return mask
 
+model_path=f"model/diffusion_model_transformer{image_size}.pth"
+optimizer_path = f"model/diffusion_optimizer_transformer{image_size}.pth"
+
 if __name__ == "__main__":
-    model_path="model/diffusion_model_transformer.pth"
-    optimizer_path = "model/diffusion_optimizer_transformer.pth"
+
     # 如果所有模型和优化器的权重文件都存在，则加载
     if os.path.exists(model_path)&os.path.exists(optimizer_path):
         print("发现已有模型和优化器权重文件，正在加载...")
@@ -246,19 +249,21 @@ if __name__ == "__main__":
             xt = xt * (1 - mask)
             noise = noise * (1 - mask)
 
-            labels = torch.zeros((batch_size,),dtype=torch.long).cuda()  # 随机分类标签
+            labels = torch.zeros((imgs.size(0),),dtype=torch.long).cuda()  # 随机分类标签
 
             # 预测噪声
             optimizer.zero_grad()
-            output = diffusion_model(xt + imgs * mask, t,labels)
+            predicted_noise = diffusion_model(xt + imgs * mask, t,labels)
 
-            predicted_noise = output[:, :3, :, :]
-            log_sigma_squared = output[:, 3:, :, :]
+
+
             predicted_noise = predicted_noise * (1 - mask)
 
-            mse_loss = F.mse_loss(predicted_noise, noise)
-            sigma_loss = torch.mean(log_sigma_squared)
-            loss = mse_loss + 0.1 * sigma_loss
+
+
+
+            # 计算 NLL 损失
+            loss = F.mse_loss(predicted_noise,noise)
 
 
 
@@ -267,16 +272,18 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
-            sigma = torch.exp(0.5 * log_sigma_squared)
             print(f"[Epoch {epoch+1}/{epochs}] [Batch {i+1}/{len(dataloader)}] [Loss: {loss.item()}]")
-            fake_imgs=backward_diffusion(xt[0], t[0], predicted_noise[0],alphas, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod,beta_schedule,sigma)
-            print(f"Step {t[1]}: xt min {fake_imgs.min().item()}, max {fake_imgs.max().item()}")
+            #fake_imgs=backward_diffusion(xt[0], t[0], predicted_noise[0],alphas, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod,beta_schedule,posterior_variance)
+            #print(f"Step {t[1]}: xt min {fake_imgs.min().item()}, max {fake_imgs.max().item()}")
 
-        save_image(fake_imgs*(1-mask[0])+imgs[0]*mask[0], f"images/{epoch + 1}.png",  normalize=False)
+
         #save_image(predicted_noise[:25]-noise[:25], f"images/{epoch + 1}noise.png", nrow=5, normalize=False)
 
         # 每 10 个 epoch 保存模型
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
             torch.save(diffusion_model.state_dict(), model_path)
             torch.save(optimizer.state_dict(), optimizer_path)
             print("模型已保存。")
+            fake_imgs = backward_diffusion(xt, t, predicted_noise, alphas, sqrt_alphas_cumprod,
+                                           sqrt_one_minus_alphas_cumprod, beta_schedule, posterior_variance)
+            save_image(fake_imgs * (1 - mask) + imgs * mask, f"images/{epoch + 1}.png",nrow=5, normalize=False)
