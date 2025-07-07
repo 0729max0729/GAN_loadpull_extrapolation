@@ -43,7 +43,7 @@ def visualize_xt_distribution(xt, step, save_path=None):
 diffusion_model.load_state_dict(torch.load(model_path))
 
 # 加载输入图像并生成遮罩
-input_image_path = "test_results/generated_image.png"  # 替换为您的输入图像路径
+input_image_path = "test_data/img.png"  # 替换为您的输入图像路径
 input_image = Image.open(input_image_path).convert("RGB")
 
 input_tensor = transform(input_image).unsqueeze(0).to(device)

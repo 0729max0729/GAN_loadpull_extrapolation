@@ -8,14 +8,16 @@ from torchvision.utils import save_image
 from PIL import Image
 import os
 
+from DiT import DiT_B_4
+
 # 参数设置
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-batch_size = 64
+batch_size = 16
 lr = 0.0002
 epochs = 300
-
+image_size=256
 # 图像修复中的遮挡函数
-def mask_image(img, mask_size=64):
+def mask_image(img, mask_size=int(image_size/4)):
     """在图像上添加遮挡块并用高斯噪声填充，遮挡区域限制在圆内"""
     _, h, w = img.size()
     radius = w // 2  # 半径为图像宽度的一半
@@ -172,7 +174,7 @@ class CustomDataset(Dataset):
 
 # 图像预处理转换
 transform = transforms.Compose([
-    transforms.Resize(256),
+    transforms.Resize(image_size),
     transforms.ToTensor(),
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # 图像归一化到 [-1, 1]
 ])
@@ -182,7 +184,14 @@ dataset = CustomDataset(root_dir="ADS_smith_chart_plots", transform=transform)
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 # 初始化生成器和判别器
-generator = Generator().to(device)
+# 初始化模型
+generator = DiT_B_4(
+        input_size=image_size,  # 输入图像的大小，例如 32x32
+        in_channels=3,  # 输入图像通道数（RGB 图像为 3）
+        num_classes=1,  # 类别数量
+        learn_sigma=False  # 是否学习噪声方差
+    ).to(device)  # 使用 GPU
+
 discriminator = Discriminator().to(device)
 
 # 损失函数和优化器
@@ -195,10 +204,10 @@ optimizer_D = optim.Adam(discriminator.parameters(), lr=lr, betas=(0.5, 0.999))
 import os
 
 # 检查文件是否存在
-generator_path = "model/generator_UNET.pth"
-discriminator_path = "model/discriminator_UNET.pth"
-optimizer_G_path = "model/optimizer_G_UNET.pth"
-optimizer_D_path = "model/optimizer_D_UNET.pth"
+generator_path = f"model/generator_UNET{image_size}.pth"
+discriminator_path = f"model/discriminator_UNET{image_size}.pth"
+optimizer_G_path = f"model/optimizer_G_UNET{image_size}.pth"
+optimizer_D_path = f"model/optimizer_D_UNET{image_size}.pth"
 
 # 如果所有模型和优化器的权重文件都存在，则加载
 if all(os.path.exists(path) for path in [generator_path, discriminator_path, optimizer_G_path, optimizer_D_path]):
@@ -254,7 +263,11 @@ if __name__ == "__main__":
 
             optimizer_D.zero_grad()
             real_loss = criterion(discriminator(imgs), real_labels)
-            fake_imgs = generator(masked_imgs)
+
+            labels = torch.zeros((imgs.size(0),), dtype=torch.long).to(device)  # 随机分类标签
+            t = torch.zeros((imgs.size(0),), dtype=torch.long).to(device)  # 随机分类标签
+
+            fake_imgs = generator(masked_imgs,t,labels)
             fake_loss = criterion(discriminator(fake_imgs.detach()), fake_labels)
             d_loss = real_loss + fake_loss
             d_loss.backward()

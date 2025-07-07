@@ -16,7 +16,7 @@ from UNet import UNet
 
 # 参数设置
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-batch_size = 32
+batch_size = 256
 lr = 1e-4
 epochs = 1001
 T = 256  # 扩散过程的总时间步长
