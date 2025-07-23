@@ -7,7 +7,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.utils import save_image
 from PIL import Image
 import os
-
 from DiT import DiT_B_4
 
 # 参数设置
@@ -52,17 +51,13 @@ def mask_image(img, mask_size=int(image_size/4)):
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
-
-        # 编码器部分
         self.enc1 = self.conv_block(3, 64)
         self.enc2 = self.conv_block(64, 128)
         self.enc3 = self.conv_block(128, 256)
         self.enc4 = self.conv_block(256, 512)
         self.enc5 = self.conv_block(512, 1024)
         self.enc6 = self.conv_block(1024, 2048)
-        self.enc7 = self.conv_block(2048, 4096)  # 增加深度
-
-        # 解码器部分
+        self.enc7 = self.conv_block(2048, 4096)
         self.dec7 = self.upconv_block(4096, 2048)
         self.dec6 = self.upconv_block(2048 + 2048, 1024)
         self.dec5 = self.upconv_block(1024 + 1024, 512)
@@ -77,25 +72,23 @@ class Generator(nn.Module):
             nn.Conv2d(32, 3, kernel_size=1),
             nn.Tanh())
 
-
     def conv_block(self, in_channels, out_channels, kernel_size=3, padding=1):
-        """卷积块：Conv2d -> BatchNorm -> ReLU"""
         return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=2, padding=padding),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=0.2)
         )
 
     def upconv_block(self, in_channels, out_channels, kernel_size=3, padding=1):
-        """反卷积块：ConvTranspose2d -> BatchNorm -> ReLU"""
         return nn.Sequential(
             nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, stride=2, padding=padding, output_padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=0.2)
         )
 
     def forward(self, img):
-        # 编码器
         e1 = self.enc1(img)
         e2 = self.enc2(e1)
         e3 = self.enc3(e2)
@@ -103,8 +96,6 @@ class Generator(nn.Module):
         e5 = self.enc5(e4)
         e6 = self.enc6(e5)
         e7 = self.enc7(e6)
-
-        # 解码器
         d7 = self.dec7(e7)
         d6 = self.dec6(torch.cat([d7, e6], dim=1))
         d5 = self.dec5(torch.cat([d6, e5], dim=1))
@@ -112,9 +103,8 @@ class Generator(nn.Module):
         d3 = self.dec3(torch.cat([d4, e3], dim=1))
         d2 = self.dec2(torch.cat([d3, e2], dim=1))
         d1 = self.dec1(torch.cat([d2, e1], dim=1))
-
-        # 输出
         return self.output_conv(d1)
+
 
 
 
